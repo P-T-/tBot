@@ -1,7 +1,10 @@
+-- by PixelToast (ping,pong)
+-- some of the cleanest and fully commented code you will ever see
+
+-- so how are you holding up
 local socket=require("socket")
 local http=require("socket.http")
 local url=require("socket.url")
-local lfs=require("lfs")
 local ltn12=require("ltn12")
 local config
 do
@@ -60,20 +63,23 @@ end
 local parsecmd
 do
 	local cmdat
+	local pfx=""
 	local function say(txt)
 		if cmdat.chan==cnick then
-			sv:send("PRIVMSG "..cmdat.nick.." :"..txt.."\r\n")
+			sv:send("PRIVMSG "..cmdat.nick.." :"..pfx..txt.."\r\n")
 		else
-			sv:send("PRIVMSG "..cmdat.chan.." :"..txt.."\r\n")
+			sv:send("PRIVMSG "..cmdat.chan.." :"..pfx..txt.."\r\n")
 		end
 	end
 	local short={
 		["s"]="server",
 		["w"]="wiki",
+		["t"]="tell",
 	}
-	local cmds={
+	local cmds
+	cmds={
 		["help"]=function()
-			say("Commands: help, server, wiki | Test commands in PM first!")
+			say("Commands: tell, help, server, wiki | Test commands in PM first!")
 		end,
 		["ping"]=function()
 			say("pong")
@@ -84,44 +90,44 @@ do
 				m[#m+1]=ma
 			end
 			if #m>2 or #m<1 then
-				say(cmdat.nick..", Usage: .server <ip> [port]")
+				say("Usage: .server <ip> [port]")
 				return
 			end
 			m[2]=tonumber(m[2] or "7777")
 			if not m[2] then
-				say(cmdat.nick..", Invalid port!")
+				say("Invalid port!")
 				return
 			end
 			if m[2]>65535 or m[2]<1024 then
-				say(cmdat.nick..", Port out of allowed range!")
+				say("Port out of allowed range!")
 				return
 			end
 			local n=socket.dns.toip(m[1])
 			if not n then
-				say(cmdat.nick..", Could not resolve address!")
+				say("Could not resolve address!")
 				return
 			end
 			local s=socket.tcp()
 			s:settimeout(0.5)
 			local sv=s:connect(n,m[2])
 			if not sv then
-				say(cmdat.nick..", Could not connect!")
+				say("Could not connect!")
 				return
 			end
 			local pa="\1Terraria"..config.vernum
 			s:send(string.char(#pa).."\0\0\0"..pa)
 			local pk=s:receive(5)
 			if not pk then
-				say(cmdat.nick..", Could not connect!")
+				say("Could not connect!")
 				return
 			end
 			pk=pk:sub(5)
 			if pk=="\3" then
-				say(cmdat.nick..", Server running and updated to "..config.version)
+				say("Server running and updated to "..config.version)
 			elseif pk=="\2" then
-				say(cmdat.nick..", Server running but outdated (<"..config.version..")")
+				say("Server running but outdated (<"..config.version..")")
 			else
-				say(cmdat.nick..", Unknown response code: 0x"..string.format("%X",string.byte(pk)))
+				say("Unknown response code: 0x"..string.format("%X",string.byte(pk)))
 			end
 		end,
 		["setversion"]=function(dat)
@@ -130,22 +136,21 @@ do
 				m[#m+1]=ma
 			end
 			if #m~=2 then
-				say(cmdat.nick..", Usage: .setversion <number> <name> ; Example: 71 1.2.0.3.1")
+				say("Usage: .setversion <number> <name> ; Example: 71 1.2.0.3.1")
 				return
 			end
 			m[1]=tonumber(m[1])
 			if not m[1] then
-				say(cmdat.nick..", Invalid version number!")
+				say("Invalid version number!")
 				return
 			end
 			config.vernum=m[1]
 			config.version=m[2]
 			savecfg()
-			say(cmdat.nick..", Version set!")
+			say("Version set!")
 		end,
 		["wiki"]=function(dat)
-			dat=dat:gsub("%s+"," ")
-			if dat==" " or #dat==0 then
+			if #dat:gsub("%s","")==0 then
 				say(cmdat.nick..", Usage: .wiki <search>")
 				return
 			end
@@ -178,7 +183,27 @@ do
 					say("No results.")
 				end
 			end
-		end
+		end,
+		["tell"]=function(dat)
+			local m={}
+			for ma in dat:gmatch("%S+") do
+				m[#m+1]=ma
+			end
+			if not m[2] then
+				say("Usage: .tell <person> <command> <args>")
+				return
+			end
+			--[[if m[2]=="tell" or m[2]=="t" then
+				say("Nice try :P")
+			end]]
+			if not cmds[m[2]] then
+				say("Unknown command: "..m[2])
+				return
+			end
+			pfx=m[1]..", "
+			cmds[m[2]](m[3] or "")
+			pfx=""
+		end,
 	}
 	for k,v in pairs(short) do
 		cmds[k]=cmds[v]
@@ -270,26 +295,34 @@ local resp={
 		os.exit()
 	end
 }
-connect()
-while true do
-	local s,e=sv:receive()
-	if e=="closed" then
-		connect()
-	end
-	while s do
-		for k,v in pairs(resp) do
-			if type(k)=="function" then
-				k=k()
-			end
-			local m={s:match(k)}
-			if m[1] then
-				v(unpack(m))
-			end
-		end
-		s,e=sv:receive()
+local e,r=pcall(function()
+	connect()
+	while true do
+		local s,e=sv:receive()
 		if e=="closed" then
 			connect()
 		end
+		while s do
+			print(s)
+			for k,v in pairs(resp) do
+				if type(k)=="function" then
+					k=k()
+				end
+				local m={s:match(k)}
+				if m[1] then
+					v(unpack(m))
+				end
+			end
+			s,e=sv:receive()
+			if e=="closed" then
+				connect()
+			end
+		end
+		socket.select({sv})
 	end
-	socket.select({sv})
+end)
+if not e then
+	sv:send("QUIT "..r.."\r\n")
+	error(r)
 end
+-- because im a potato
